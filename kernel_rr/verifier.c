@@ -21,7 +21,7 @@ typedef struct rr_checkpoint_t {
 } rr_checkpoint;
 
 
-rr_checkpoint *check_points[32];
+rr_checkpoint *check_points[MAX_CPU_NUM];
 static int verify_replay = 0;
 static int passed = 0;
 
@@ -33,7 +33,7 @@ int is_verify_replay(void)
 
 void rr_init_checkpoints(void)
 {
-    for (int i=0; i < 32; i++) {
+    for (int i=0; i < MAX_CPU_NUM; i++) {
         check_points[i] = NULL;
     }
 }

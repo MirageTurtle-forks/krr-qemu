@@ -31,27 +31,6 @@ static size_t get_event_size(int type) {
     }
 }
 
-static const char* get_event_type_name(int type) {
-    switch(type) {
-        case EVENT_TYPE_INTERRUPT: return "INTERRUPT";
-        case EVENT_TYPE_EXCEPTION: return "EXCEPTION";
-        case EVENT_TYPE_SYSCALL: return "SYSCALL";
-        case EVENT_TYPE_IO_IN: return "IO_IN";
-        case EVENT_TYPE_CFU: return "CFU";
-        case EVENT_TYPE_RANDOM: return "RANDOM";
-        case EVENT_TYPE_RDTSC: return "RDTSC";
-        case EVENT_TYPE_DMA_DONE: return "DMA_DONE";
-        case EVENT_TYPE_GFU: return "GFU";
-        case EVENT_TYPE_STRNLEN: return "STRNLEN";
-        case EVENT_TYPE_RDSEED: return "RDSEED";
-        case EVENT_TYPE_RELEASE: return "RELEASE";
-        case EVENT_TYPE_INST_SYNC: return "INST_SYNC";
-        case EVENT_TYPE_MMIO: return "MMIO";
-        case EVENT_TYPE_PTE: return "PTE";
-        default: return "UNKNOWN";
-    }
-}
-
 static void print_interrupt_event(const rr_interrupt* interrupt) {
     printf("  ID: %d\n", interrupt->id);
     printf("  Vector: %d\n", interrupt->vector);

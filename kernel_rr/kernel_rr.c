@@ -71,27 +71,12 @@ static int restore_snapshot_id = -1;
 static const char *replay_snapshot_info_path = "replay-snapshot-info";
 static const char *replay_initial_snapshot;
 
-
-static int event_syscall_num = 0;
-static int event_exception_num = 0;
-static int event_interrupt_num = 0;
-static int event_io_input_num = 0;
-static int event_rdtsc_num = 0;
-static int event_cfu_num = 0;
-static int event_gfu_num = 0;
-static int event_pte_num = 0;
-static int event_dma_done = 0;
-static int event_rdseed_num = 0;
-static int event_release = 0;
-static int event_sync_inst = 0;
-
 static int started_replay = 0;
 static int initialized_replay = 0;
 
 // static int replayed_interrupt_num = 0;
 
 static int replayed_event_num = 0;
-static int total_event_number = 0;
 
 __attribute_maybe_unused__ static bool log_loaded = false;
 
@@ -131,7 +116,8 @@ static void init_lock_owner(void);
 static void rr_sync_header(void);
 static void replay_save_snapshot(rr_replay_info *cur_replay_info);
 static void replay_save_progress_info(rr_replay_info_node *info_node);
-static int get_total_events_num(void);
+static int get_total_events_num(rr_event_counters counters);
+static void rr_print_events_stat(rr_event_counters counters);
 
 static clock_t replay_start_time;
 static long long record_start_time;
@@ -151,7 +137,12 @@ typedef struct rr_event_loader_t {
     unsigned long total_events;
 } rr_event_loader;
 
-static rr_event_loader *event_loader;
+typedef struct rr_session_t {
+    rr_event_counters event_counters;
+    rr_event_loader *event_loader;
+} rr_session;
+
+static rr_session *g_rr_session;
 
 
 #define DEBUG_POINTS_NUM 7
@@ -209,6 +200,12 @@ int get_checkpoint_interval(void)
     }
 
     return checkpoint_interval;
+}
+
+static void init_rr_session(void)
+{
+    g_rr_session = (rr_session *)malloc(sizeof(rr_session));
+    g_rr_session->event_counters = (rr_event_counters){0};
 }
 
 static void rr_do_insert_one_breakpoint(CPUState *cpu, unsigned long bp)
@@ -485,7 +482,6 @@ static void initialize_replay(void) {
         cpu->rr_cached_spin_count = 0;
     }
 
-    total_event_number = get_total_events_num();
     printf("Initialized replay, cpu number=%d\n", cpu_cnt);
     replay_start_time = clock();
 }
@@ -568,12 +564,12 @@ void inc_replayed_number(void)
     replayed_event_num++;
 }
 
-static int get_total_events_num(void)
+static inline int get_total_events_num(rr_event_counters counters)
 {
-    return event_interrupt_num + event_syscall_num + event_exception_num + \
-           event_cfu_num + event_io_input_num + event_rdtsc_num + \
-           event_dma_done + event_gfu_num + event_rdseed_num + \
-           event_release + event_pte_num;
+    return counters.event_interrupt_num + counters.event_syscall_num + counters.event_exception_num + \
+           counters.event_cfu_num + counters.event_io_input_num + counters.event_rdtsc_num + \
+           counters.event_dma_done + counters.event_gfu_num + counters.event_rdseed_num + \
+           counters.event_release + counters.event_pte_num + counters.event_sync_inst;
 }
 
 static void rr_init_ram_bitmaps(void) {
@@ -648,7 +644,7 @@ static void finish_replay(void)
 
      printf("Replay executed in %f seconds\n", cpu_time_used);
 
-    rr_print_events_stat();
+    rr_print_events_stat(g_rr_session->event_counters);
 
     exit(0);
 }
@@ -658,6 +654,7 @@ static void pre_record(void) {
 
     printf("Removing existing log files: %s\n", kernel_rr_log);
 
+    init_rr_session();
     rr_init_checkpoints();
     remove(kernel_rr_log);
     rr_dma_pre_record();
@@ -1233,7 +1230,6 @@ void rr_do_replay_gfu_call_begin(CPUState *cpu)
     rr_pop_event_head();
 }
 
-
 __attribute_maybe_unused__ static bool
 is_valid_user_space_address(uint64_t addr) {
     if (addr < 0x0000000000001000)
@@ -1386,12 +1382,56 @@ rr_merge_user_interrupt_of_guest_and_hypervisor(rr_interrupt *guest_interrupt)
     rr_smp_event_log_queues[guest_interrupt->id] = vcpu_event_head->next;
 }
 
-static rr_event_log *
-rr_event_log_new_from_event(rr_event_log event, int record_mode)
-{
+static inline void increment_event_counter(rr_event_counters *counters, int event_type) {
+    switch (event_type) {
+        case EVENT_TYPE_INTERRUPT:
+            counters->event_interrupt_num++;
+            break;
+        case EVENT_TYPE_EXCEPTION:
+            counters->event_exception_num++;
+            break;
+        case EVENT_TYPE_SYSCALL:
+            counters->event_syscall_num++;
+            break;
+        case EVENT_TYPE_IO_IN:
+            counters->event_io_input_num++;
+            break;
+        case EVENT_TYPE_RDTSC:
+            counters->event_rdtsc_num++;
+            break;
+        case EVENT_TYPE_PTE:
+            counters->event_pte_num++;
+            break;
+        case EVENT_TYPE_GFU:
+            counters->event_gfu_num++;
+            break;
+        case EVENT_TYPE_CFU:
+            counters->event_cfu_num++;
+            break;
+        case EVENT_TYPE_RDSEED:
+            counters->event_rdseed_num++;
+            break;
+        case EVENT_TYPE_MMIO:
+            counters->event_io_input_num++;
+            break;
+        case EVENT_TYPE_DMA_DONE:
+            counters->event_dma_done++;
+            break;
+        case EVENT_TYPE_RELEASE:
+            counters->event_release++;
+            break;
+        case EVENT_TYPE_INST_SYNC:
+            counters->event_sync_inst++;
+            break;
+        default:
+            break;
+    }
+    counters->total_event_number++;
+}
+
+// Updated event creation function using the counter increment
+static rr_event_log *rr_event_log_new_from_event(rr_event_log event, __attribute_maybe_unused__ int record_mode) {
     rr_event_log *event_record;
-    __attribute_maybe_unused__ int event_num = 0;
-    __attribute_maybe_unused__ const char *interrupt_title_name = "Interrupt";
 
     event_record = rr_event_log_new();
 
@@ -1401,85 +1441,65 @@ rr_event_log_new_from_event(rr_event_log event, int record_mode)
     event_record->id = event.id;
     event_record->next = NULL;
 
-    if (!record_mode) {
-        event_num = get_total_events_num() + 1;
-    } else {
-        interrupt_title_name = "User-Interrupt";
+    switch (event.type) {
+        case EVENT_TYPE_INTERRUPT:
+            event_record->inst_cnt = event.inst_cnt;
+            memcpy(&event_record->event.interrupt, &event.event.interrupt, sizeof(rr_interrupt));
+            break;
+
+        case EVENT_TYPE_EXCEPTION:
+            memcpy(&event_record->event.exception, &event.event.exception, sizeof(rr_exception));
+            break;
+
+        case EVENT_TYPE_SYSCALL:
+            memcpy(&event_record->event.syscall, &event.event.syscall, sizeof(rr_syscall));
+            break;
+
+        case EVENT_TYPE_IO_IN:
+            memcpy(&event_record->event.io_input, &event.event.io_input, sizeof(rr_io_input));
+            break;
+
+        case EVENT_TYPE_RDTSC:
+            memcpy(&event_record->event.io_input, &event.event.io_input, sizeof(rr_io_input));
+            break;
+
+        case EVENT_TYPE_PTE:
+            memcpy(&event_record->event.gfu, &event.event.gfu, sizeof(rr_gfu));
+            break;
+
+        case EVENT_TYPE_GFU:
+            memcpy(&event_record->event.gfu, &event.event.gfu, sizeof(rr_gfu));
+            break;
+
+        case EVENT_TYPE_RDSEED:
+            memcpy(&event_record->event.gfu, &event.event.gfu, sizeof(rr_gfu));
+            break;
+
+        case EVENT_TYPE_CFU:
+            memcpy(&event_record->event.cfu, &event.event.cfu, sizeof(rr_cfu));
+            event_record->event.cfu.data = event.event.cfu.data;
+            break;
+
+        case EVENT_TYPE_MMIO:
+            memcpy(&event_record->event.io_input, &event.event.io_input, sizeof(rr_io_input));
+            break;
+
+        case EVENT_TYPE_DMA_DONE:
+            memcpy(&event_record->event.dma_done, &event.event.dma_done, sizeof(rr_dma_done));
+            break;
+
+        case EVENT_TYPE_RELEASE:
+            break;
+
+        case EVENT_TYPE_INST_SYNC:
+            memcpy(&event_record->event.interrupt, &event.event.interrupt, sizeof(rr_interrupt));
+            break;
+
+        default:
+            break;
     }
 
-    if (record_mode && event.type != EVENT_TYPE_INTERRUPT) {
-        printf("Unexpected normal event type %d that is not shm", event.type);
-        abort();
-        return NULL;
-    }
-
-    switch (event.type)
-    {
-    case EVENT_TYPE_INTERRUPT:
-        event_record->inst_cnt = event.inst_cnt;
-        memcpy(&event_record->event.interrupt, &event.event.interrupt, sizeof(rr_interrupt));
-        // qemu_log("%s event\n", interrupt_title_name);
-        if (!record_mode)
-            event_interrupt_num++;
-        else
-            interrupt_check(event_record);
-        break;
-
-    case EVENT_TYPE_EXCEPTION:
-        memcpy(&event_record->event.exception, &event.event.exception, sizeof(rr_exception));
-        event_exception_num++;
-        break;
-
-    case EVENT_TYPE_SYSCALL:
-        memcpy(&event_record->event.syscall, &event.event.syscall, sizeof(rr_syscall));
-        event_syscall_num++;
-        break;
-
-     case EVENT_TYPE_IO_IN:
-        memcpy(&event_record->event.io_input, &event.event.io_input, sizeof(rr_io_input));
-        event_io_input_num++;
-        break;
-     case EVENT_TYPE_RDTSC:
-        memcpy(&event_record->event.io_input, &event.event.io_input, sizeof(rr_io_input));
-        event_rdtsc_num++;
-        break;
-    case EVENT_TYPE_PTE:
-        memcpy(&event_record->event.gfu, &event.event.gfu, sizeof(rr_gfu));
-        event_pte_num++;
-        break;
-    case EVENT_TYPE_GFU:
-        memcpy(&event_record->event.gfu, &event.event.gfu, sizeof(rr_gfu));
-        event_gfu_num++;
-        break;
-    case EVENT_TYPE_RDSEED:
-        memcpy(&event_record->event.gfu, &event.event.gfu, sizeof(rr_gfu));
-        event_gfu_num++;
-        break;
-    case EVENT_TYPE_CFU:
-        memcpy(&event_record->event.cfu, &event.event.cfu, sizeof(rr_cfu));
-
-        event_record->event.cfu.data = event.event.cfu.data;
-
-        event_cfu_num++;
-        break;
-    case EVENT_TYPE_MMIO:
-        memcpy(&event_record->event.io_input, &event.event.io_input, sizeof(rr_io_input));
-        event_io_input_num++;
-        break;
-    case EVENT_TYPE_DMA_DONE: // Unused
-        memcpy(&event_record->event.dma_done, &event.event.dma_done, sizeof(rr_dma_done));
-        event_dma_done++;
-        break;
-    case EVENT_TYPE_RELEASE:
-        event_release++;
-        break;
-    case EVENT_TYPE_INST_SYNC:
-        memcpy(&event_record->event.interrupt, &event.event.interrupt, sizeof(rr_interrupt));
-        event_sync_inst++;
-        break;
-    default:
-        break;
-    }
+    increment_event_counter(&(g_rr_session->event_counters), event_record->type);
 
     return event_record;
 }
@@ -1740,89 +1760,6 @@ static void interrupt_check(rr_event_log *event)
 }
 
 __attribute_maybe_unused__
-static rr_event_log *rr_event_new_counting(void *event, int type, int* copied)
-{
-    int copied_size = sizeof(rr_event_log_guest);
-
-    __attribute_maybe_unused__ int event_num = get_total_events_num() + 1;
-
-    // printf("type %d\n", type);
-    switch (type)
-    {
-    case EVENT_TYPE_INTERRUPT:
-        copied_size = sizeof(rr_interrupt);
-        event_interrupt_num++;
-        break;
-
-    case EVENT_TYPE_EXCEPTION:
-        copied_size = sizeof(rr_exception);
-        event_exception_num++;
-        break;
-
-    case EVENT_TYPE_SYSCALL:
-        copied_size = sizeof(rr_syscall);
-        event_syscall_num++;
-        break;
-
-    case EVENT_TYPE_IO_IN:
-        copied_size = sizeof(rr_io_input);
-        event_io_input_num++;
-        break;
-    case EVENT_TYPE_RDTSC:
-        copied_size = sizeof(rr_io_input);
-        event_rdtsc_num++;
-        break;
-    case EVENT_TYPE_PTE:
-        copied_size = sizeof(rr_gfu);
-        event_pte_num++;
-        break;
-    case EVENT_TYPE_GFU:
-        copied_size = sizeof(rr_gfu);
-        event_gfu_num++;
-        break;
-    case EVENT_TYPE_CFU:
-        rr_cfu *cfu = (rr_cfu *)event;
-        copied_size = sizeof(rr_cfu);
-
-        // memcpy(&cfu, event, copied_size);
-        int s = cfu->len * sizeof(unsigned char);
-        // printf("%s\n", (unsigned char *)event_record->event.cfu.data);
-        copied_size += s;
-
-        event_cfu_num++;
-        break;
-    case EVENT_TYPE_RDSEED:
-        copied_size = sizeof(rr_gfu);
-        event_rdseed_num++;
-        break;
-    case EVENT_TYPE_MMIO:
-        copied_size = sizeof(rr_io_input);
-        event_io_input_num++;
-        break;
-    case EVENT_TYPE_RELEASE:
-        copied_size = sizeof(rr_event_log_guest);
-        event_release++;
-        break;
-    case EVENT_TYPE_INST_SYNC:
-        copied_size = sizeof(rr_event_log_guest);
-        event_sync_inst++;
-        break;
-    case EVENT_TYPE_DMA_DONE:
-        copied_size = sizeof(rr_dma_done);
-        event_dma_done++;
-        break;
-    default:
-        printf("Shm Event: unrecognized event %d\n", type);
-        abort();
-        break;
-    }
-
-    *copied = copied_size;
-
-    return NULL;
-}
-
-__attribute_maybe_unused__
 static rr_event_log *rr_event_log_new_from_event_shm(void *event, int type, int* copied)
 {
     int copied_size = sizeof(rr_event_log_guest);
@@ -1833,7 +1770,7 @@ static rr_event_log *rr_event_log_new_from_event_shm(void *event, int type, int*
 
     event_record->type = type;
 
-    __attribute_maybe_unused__ int event_num = get_total_events_num() + 1;
+    __attribute_maybe_unused__ int event_num = get_total_events_num(g_rr_session->event_counters) + 1;
 
     // printf("type %d\n", type);
     switch (type)
@@ -1846,73 +1783,56 @@ static rr_event_log *rr_event_log_new_from_event_shm(void *event, int type, int*
         memcpy(&event_record->event.interrupt, in, copied_size);
 
         interrupt_check(event_record);
-        event_interrupt_num++;
         break;
 
     case EVENT_TYPE_EXCEPTION:
         copied_size = sizeof(rr_exception);
         memcpy(&event_record->event.exception, event, copied_size);
-        event_exception_num++;
         break;
 
     case EVENT_TYPE_SYSCALL:
         copied_size = sizeof(rr_syscall);
         memcpy(&event_record->event.syscall, event, copied_size);
-        event_syscall_num++;
         break;
 
     case EVENT_TYPE_IO_IN:
         copied_size = sizeof(rr_io_input);
         memcpy(&event_record->event.io_input, event, copied_size);
-        event_io_input_num++;
         break;
     case EVENT_TYPE_RDTSC:
         copied_size = sizeof(rr_io_input);
         memcpy(&event_record->event.io_input, event, copied_size);
-        event_rdtsc_num++;
         break;
     case EVENT_TYPE_PTE:
         copied_size = sizeof(rr_gfu);
         memcpy(&event_record->event.gfu, event, copied_size);
-        event_pte_num++;
         break;
     case EVENT_TYPE_GFU:
         copied_size = sizeof(rr_gfu);
         memcpy(&event_record->event.gfu, event, copied_size);
-        event_gfu_num++;
         break;
     case EVENT_TYPE_CFU:
         copied_size = sizeof(rr_cfu);
-        // unsigned char *c = (unsigned char *)(event + sizeof(rr_cfu));
-        // printf("cfu addr: %p %s, data %p, offset=%lu\n", c, c, event_record->event.cfu.data, event + sizeof(rr_cfu) - ivshmem_base_addr);
-
         memcpy(&event_record->event.cfu, event, copied_size);
-        int s = event_record->event.cfu.len * sizeof(unsigned char);
-        
+
+        int s = event_record->event.cfu.len * sizeof(unsigned char);        
         event_record->event.cfu.data = (unsigned char *)malloc(s);
         memcpy(event_record->event.cfu.data, (unsigned char *)(event + sizeof(rr_cfu)), s);
 
-        // printf("%s\n", (unsigned char *)event_record->event.cfu.data);
         copied_size += s;
-
-        event_cfu_num++;
         break;
     case EVENT_TYPE_RDSEED:
         copied_size = sizeof(rr_gfu);
         memcpy(&event_record->event.gfu, event, sizeof(rr_gfu));
-        event_rdseed_num++;
         break;
     case EVENT_TYPE_MMIO:
         copied_size = sizeof(rr_io_input);
         memcpy(&event_record->event.io_input, event, sizeof(rr_io_input));
-        event_io_input_num++;
         break;
     case EVENT_TYPE_RELEASE:
         copied_size = sizeof(rr_event_log_guest);
         event_g = (rr_event_log_guest *)event;
         event_record->id = event_g->id;
-
-        event_release++;
         break;
     case EVENT_TYPE_INST_SYNC:
         copied_size = sizeof(rr_event_log_guest);
@@ -1920,12 +1840,10 @@ static rr_event_log *rr_event_log_new_from_event_shm(void *event, int type, int*
         event_record->inst_cnt = event_g->inst_cnt;
         event_record->id = event_g->id;
         event_record->event.interrupt.spin_count = event_g->event.interrupt.spin_count;
-        event_sync_inst++;
         break;
     case EVENT_TYPE_DMA_DONE:
         copied_size = sizeof(rr_dma_done);
         memcpy(&event_record->event.dma_done, event, sizeof(rr_dma_done));
-        event_dma_done++;
         if (0 < event_record->event.dma_done.inst_cnt && event_record->event.dma_done.inst_cnt < 100) {
             printf("Strange inst cnt\n");
             abort();
@@ -1937,26 +1855,10 @@ static rr_event_log *rr_event_log_new_from_event_shm(void *event, int type, int*
         break;
     }
 
+    increment_event_counter(&(g_rr_session->event_counters), type);
     *copied = copied_size;
 
     return event_record;
-}
-
-__attribute_maybe_unused__
-static void append_event_shm(void *event, int type)
-{
-    int copied;
-
-    rr_event_log *event_record = rr_event_log_new_from_event_shm(event, type, &copied);
-    if (rr_event_cur == NULL) {
-        rr_event_log_head = event_record;
-        rr_event_cur = event_record;
-    } else {
-        rr_event_cur->next = event_record;
-        rr_event_cur = rr_event_cur->next;
-    }
-
-    rr_event_cur->next = NULL;
 }
 
 void rr_pop_event_head(void) {
@@ -1970,11 +1872,11 @@ void rr_pop_event_head(void) {
 
     replayed_event_num++;
 
-#ifndef RR_LOG_DEBUG
-    if (!(replayed_event_num % 1000)) {
-        printf("Replayed events[%d/%d]\n", replayed_event_num, total_event_number);
+    if (!rr_debug_enabled) {
+        if (!(replayed_event_num % 1000)) {
+            printf("Replayed events[%d/%lu]\n", replayed_event_num, g_rr_session->event_loader->total_events);
+        }
     }
-#endif
 }
 
 rr_event_log *rr_event_log_new(void)
@@ -1990,23 +1892,23 @@ __attribute_maybe_unused__ static rr_event_log_guest *rr_event_log_guest_new(voi
 }
 
 __attribute_maybe_unused__
-void rr_print_events_stat(void)
+static void rr_print_events_stat(rr_event_counters counters)
 {
     FILE *f = fopen("rr-cost.txt", "w");
     char msg[2048];
-
-    total_event_number = get_total_events_num();
     double duration = record_end_time - record_start_time;
 
     printf("=== Event Stats ===\n");
 
+    assert(counters.total_event_number == get_total_events_num(counters));
+
     sprintf(msg, "Interrupt: %d\nSyscall: %d\nException: %d\nCFU: %d\nGFU: %d\n"
             "IO Input: %d\nRDTSC: %d\nRDSEED: %d\nPTE: %d\nInst Sync: %d\n"
             "DMA Buf Size: %lu\nTotal Replay Events: %d\nTime(s): %.2f\n",
-            event_interrupt_num, event_syscall_num, event_exception_num,
-            event_cfu_num, event_gfu_num, event_io_input_num, event_rdtsc_num,
-            event_rdseed_num, event_pte_num, event_sync_inst, get_dma_buf_size(),
-            total_event_number, duration / 1000);
+            counters.event_interrupt_num, counters.event_syscall_num, counters.event_exception_num,
+            counters.event_cfu_num, counters.event_gfu_num, counters.event_io_input_num, counters.event_rdtsc_num,
+            counters.event_rdseed_num, counters.event_pte_num, counters.event_sync_inst, get_dma_buf_size(),
+            counters.total_event_number, duration / 1000);
 
     printf("%s", msg);
     qemu_log("%s", msg);
@@ -2260,7 +2162,8 @@ static void rr_load_events(void) {
     rr_event_log loaded_node;
     rr_event_entry_header entry_header;
     int loaded_event = 0;
-    unsigned long max_events = 2000000;
+    unsigned long max_events = 4000000;
+    rr_event_loader *event_loader = g_rr_session->event_loader;
 
     if (event_loader == NULL) {
         event_loader = (rr_event_loader *)malloc(sizeof(rr_event_loader));
@@ -2281,6 +2184,7 @@ static void rr_load_events(void) {
         }
 
         event_loader->total_events = header.current_pos - 1;
+        g_rr_session->event_loader = event_loader;
         printf("Total events to read: %d\n", header.current_pos);
     }
 
@@ -2301,7 +2205,7 @@ static void rr_load_events(void) {
 
     event_loader->loaded_events += loaded_event;
 
-    rr_print_events_stat();
+    rr_print_events_stat(g_rr_session->event_counters);
     rr_log_all_events(rr_event_log_head);
     rr_event_log_start = rr_event_log_head;
 
@@ -2364,7 +2268,7 @@ int replay_finished(void)
         return 0;
     }
 
-    if (event_loader->loaded_events < event_loader->total_events) {
+    if (g_rr_session->event_loader->loaded_events < g_rr_session->event_loader->total_events) {
         printf("Continue loading more events\n");
         rr_load_events();
         return 0;
@@ -2484,7 +2388,7 @@ void rr_post_record(void)
 {
     record_end_time = current_time_in_milliseconds();
 
-    for (int i=0; i < 16; i++) {
+    for (int i=0; i < MAX_CPU_NUM; i++) {
         rr_smp_event_log_queues[i] = NULL;
     }
 
@@ -2505,7 +2409,7 @@ void rr_post_record(void)
 
     rr_record_settle_events();
 
-    rr_print_events_stat();
+    rr_print_events_stat(g_rr_session->event_counters);
 
     if (!skip_save){
         rr_save_events();
@@ -2562,7 +2466,7 @@ __attribute_maybe_unused__ static bool
 is_out_record_phase(CPUState *cpu, rr_event_log *event)
 {
     if (event->type == EVENT_TYPE_INTERRUPT && event->inst_cnt == 0) {
-        if (total_event_number - replayed_event_num < 5) {
+        if (g_rr_session->event_counters.total_event_number - replayed_event_num < 5) {
             return true;
         }
     }
@@ -2833,7 +2737,9 @@ void rr_do_replay_syscall(CPUState *cpu)
     qemu_mutex_lock(&replay_queue_mutex);
 
     if (rr_event_log_head->type != EVENT_TYPE_SYSCALL) {
-        printf("Expected event type %d, actual type %d\n", EVENT_TYPE_SYSCALL, rr_event_log_head->type);
+        printf("Expected event type %s, actual type %s\n",
+               get_event_type_name(EVENT_TYPE_SYSCALL),
+               get_event_type_name(rr_event_log_head->type));
         abort();
     }
 
@@ -2893,8 +2799,10 @@ void rr_do_replay_io_input(CPUState *cpu, unsigned long *input)
     }
 
     if (rr_event_log_head->type != EVENT_TYPE_IO_IN) {
-        LOG_MSG("Expected %d event, found %d, rip=0x%lx, cpu_id=%d\n",
-                 EVENT_TYPE_IO_IN, rr_event_log_head->type, env->eip, cpu->cpu_index);
+        printf("Expected %s event, found %s, rip=0x%lx, cpu_id=%d\n",
+                get_event_type_name(EVENT_TYPE_IO_IN),
+                get_event_type_name(rr_event_log_head->type),
+                env->eip, cpu->cpu_index);
         cpu->cause_debug = 1;
         goto finish;
     }
@@ -2954,7 +2862,9 @@ void rr_do_replay_mmio(unsigned long *input)
     qemu_mutex_lock(&replay_queue_mutex);
 
     if (rr_event_log_head->type != EVENT_TYPE_MMIO) {
-        LOG_MSG("Expected %d event, found %d\n", EVENT_TYPE_MMIO, rr_event_log_head->type);
+        printf("Expected %s event, found %s\n",
+               get_event_type_name(EVENT_TYPE_MMIO),
+               get_event_type_name(rr_event_log_head->type));
         
         CPU_FOREACH(cpu) {
             cpu->cause_debug = 1;
@@ -3011,8 +2921,10 @@ void rr_do_replay_rdpmc(CPUState *cpu, unsigned long long *val)
     }
 
     if (rr_event_log_head->type != EVENT_TYPE_IO_IN) {
-        LOG_MSG("Expected %d event, found %d, rip=0x%lx, cpu_id=%d\n",
-                 EVENT_TYPE_IO_IN, rr_event_log_head->type, env->eip, cpu->cpu_index);
+        LOG_MSG("Expected %s event, found %s, rip=0x%lx, cpu_id=%d\n",
+                 get_event_type_name(EVENT_TYPE_IO_IN),
+                 get_event_type_name(rr_event_log_head->type),
+                 env->eip, cpu->cpu_index);
         cpu->cause_debug = 1;
         goto finish;
     }
@@ -3058,8 +2970,9 @@ void rr_do_replay_rdtsc(CPUState *cpu, unsigned long *tsc)
     qemu_mutex_lock(&replay_queue_mutex);
 
     if (rr_event_log_head->type != EVENT_TYPE_RDTSC) {
-        LOG_MSG("Expected %d event, found %d, inst_cnt=%lu\n",
-                 EVENT_TYPE_RDTSC, rr_event_log_head->type, cpu->rr_executed_inst);
+        printf("Expected %s event, found %s, inst_cnt=%lu\n",
+               get_event_type_name(EVENT_TYPE_RDTSC),
+               get_event_type_name(rr_event_log_head->type), cpu->rr_executed_inst);
         // abort();
         cpu->cause_debug = true;
         // rr_pop_event_head();
@@ -3129,7 +3042,7 @@ void rr_do_replay_rdseed(unsigned long *val)
     qemu_mutex_lock(&replay_queue_mutex);
 
     if (rr_event_log_head->type != EVENT_TYPE_RDSEED) {
-        qemu_log("Expected rdseed, found %d", rr_event_log_head->type);
+        qemu_log("Expected rdseed, found %s", get_event_type_name(rr_event_log_head->type));
         abort();
     }
 
@@ -3278,6 +3191,7 @@ uint64_t rr_num_instr_before_next_interrupt(void)
 {
     if (rr_event_log_head == NULL) {
         if (!initialized_replay) {
+            init_rr_session();
             rr_load_events();
             rr_dma_network_pre_replay();
             initialize_replay();
@@ -3389,12 +3303,10 @@ static int record_event(void *event_addr)
 
     event_header = (rr_event_entry_header *)(event_addr);
 
-    // event_record = rr_event_new_counting(event_addr + sizeof(rr_event_entry_header),
-    //                                                event_header->type, &copied);
-    event_record = rr_event_log_new_from_event_shm(event_addr + sizeof(rr_event_entry_header), event_header->type, &copied);
+    event_record = rr_event_log_new_from_event_shm(event_addr + sizeof(rr_event_entry_header),
+                                                   event_header->type, &copied);
 
     if (event_record != NULL) {
-        // qemu_log("event type %d\n", event_record->type);
         if (rr_event_cur == NULL) {
             rr_event_log_head = event_record;
             rr_event_cur = event_record;
@@ -3753,7 +3665,7 @@ void rr_handle_queue_full(void)
     rr_rotate_shm_queue();
 
     qemu_log("Rotated log queue\n");
-    rr_print_events_stat();
+    rr_print_events_stat(g_rr_session->event_counters);
     
     rr_log_all_events(rr_event_log_head);
 

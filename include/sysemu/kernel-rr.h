@@ -98,6 +98,23 @@ typedef struct krr_config_t {
     int gdb_trap_error;
 } krr_config;
 
+typedef struct rr_event_counters_t {
+    int event_syscall_num;
+    int event_exception_num;
+    int event_interrupt_num;
+    int event_io_input_num;
+    int event_rdtsc_num;
+    int event_cfu_num;
+    int event_gfu_num;
+    int event_pte_num;
+    int event_dma_done;
+    int event_rdseed_num;
+    int event_release;
+    int event_sync_inst;
+
+    int total_event_number;
+} rr_event_counters;
+
 void krr_init_config(void);
 int rr_in_replay(void);
 int rr_in_record(void);

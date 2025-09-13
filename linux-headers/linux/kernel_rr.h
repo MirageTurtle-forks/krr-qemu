@@ -189,7 +189,6 @@ struct rr_event_info {
 
 void append_event(rr_event_log event, int is_record);
 rr_event_log *rr_event_log_new(void);
-void rr_print_events_stat(void);
 
 void rr_post_record(void);
 void rr_pre_replay(void);
@@ -201,6 +200,28 @@ void rr_finish_mem_log(void);
 void rr_load_mem_logs(void);
 int rr_mem_logs_enabled(void);
 void rr_enable_mem_logs(void);
+
+static inline const char* get_event_type_name(int type)
+{
+    switch(type) {
+        case EVENT_TYPE_INTERRUPT: return "INTERRUPT";
+        case EVENT_TYPE_EXCEPTION: return "EXCEPTION";
+        case EVENT_TYPE_SYSCALL: return "SYSCALL";
+        case EVENT_TYPE_IO_IN: return "IO_IN";
+        case EVENT_TYPE_CFU: return "CFU";
+        case EVENT_TYPE_RANDOM: return "RANDOM";
+        case EVENT_TYPE_RDTSC: return "RDTSC";
+        case EVENT_TYPE_DMA_DONE: return "DMA_DONE";
+        case EVENT_TYPE_GFU: return "GFU";
+        case EVENT_TYPE_STRNLEN: return "STRNLEN";
+        case EVENT_TYPE_RDSEED: return "RDSEED";
+        case EVENT_TYPE_RELEASE: return "RELEASE";
+        case EVENT_TYPE_INST_SYNC: return "INST_SYNC";
+        case EVENT_TYPE_MMIO: return "MMIO";
+        case EVENT_TYPE_PTE: return "PTE";
+        default: return "UNKNOWN";
+    }
+}
 
 struct rr_record_data {
     unsigned long shm_base_addr;
