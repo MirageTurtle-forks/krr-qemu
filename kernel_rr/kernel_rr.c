@@ -206,6 +206,7 @@ static void init_rr_session(void)
 {
     g_rr_session = (rr_session *)malloc(sizeof(rr_session));
     g_rr_session->event_counters = (rr_event_counters){0};
+    g_rr_session->event_loader = NULL;
 }
 
 static void rr_do_insert_one_breakpoint(CPUState *cpu, unsigned long bp)
@@ -670,7 +671,8 @@ static void pre_record(void) {
     record_start_time = current_time_in_milliseconds();
 }
 
-__attribute_maybe_unused__ static bool check_inst_matched_and_fix(CPUState *cpu, rr_event_log *event)
+__attribute_maybe_unused__ static bool
+check_inst_matched_and_fix(CPUState *cpu, rr_event_log *event)
 {
     if (cpu->rr_executed_inst != event->inst_cnt) {
         printf("Inst unmatched, current %lu != expected %lu\n", cpu->rr_executed_inst, event->inst_cnt);
@@ -931,7 +933,6 @@ void rr_do_replay_gfu(CPUState *cpu)
     env->regs[R_EDX] = replay_node->event.gfu.val;
     // env->regs[R_EBX] = rr_event_log_head->event.gfu.val;
 
-    // check_inst_matched_and_fix(cpu, rr_event_log_head);
     if (!reordered)
         rr_pop_event_head();
 }
@@ -1522,7 +1523,6 @@ static void rr_log_event(__attribute_maybe_unused__ rr_event_log *event_record,
                          __attribute_maybe_unused__ int event_num,
                          __attribute_maybe_unused__ int *syscall_table)
 {
-#ifdef RR_LOG_DEBUG
     switch (event_record->type)
     {
         case EVENT_TYPE_INTERRUPT:
@@ -1610,7 +1610,6 @@ static void rr_log_event(__attribute_maybe_unused__ rr_event_log *event_record,
         default:
             break;
     }
-#endif
 }
 
 static void rr_log_all_events(rr_event_log *event)
@@ -1767,12 +1766,8 @@ static rr_event_log *rr_event_log_new_from_event_shm(void *event, int type, int*
     rr_event_log_guest *event_g;
 
     event_record = rr_event_log_new();
-
     event_record->type = type;
 
-    __attribute_maybe_unused__ int event_num = get_total_events_num(g_rr_session->event_counters) + 1;
-
-    // printf("type %d\n", type);
     switch (type)
     {
     case EVENT_TYPE_INTERRUPT:
@@ -2174,12 +2169,12 @@ static void rr_load_events(void) {
         initial_queue_header = (rr_event_guest_queue_header *)malloc(sizeof(rr_event_guest_queue_header));
 
         if (!fread(initial_queue_header, sizeof(rr_event_guest_queue_header), 1, event_loader->fptr)) {
-            printf("Failed to read headr\n");
+            printf("Failed to read header\n");
             abort();
         }
 
         if (!fread(&header, sizeof(rr_event_guest_queue_header), 1, event_loader->fptr)) {
-            printf("Failed to read headr\n");
+            printf("Failed to read header\n");
             abort();
         }
 
@@ -3393,22 +3388,22 @@ int rr_inc_inst(CPUState *cpu, unsigned long next_pc, TranslationBlock *tb)
     X86CPU *c = X86_CPU(cpu);
     CPUX86State *env = &c->env;
 
-    if (tb->io_inst & IO_INST_REP) {
+    if (tb->krr_flag & IO_INST_REP) {
         qemu_log("IO_INST_REP\n");
     }
 
     if (next_pc != cpu->last_pc) {
         cpu->rr_executed_inst++;
-    } else if (tb->io_inst & IO_INST_REP_OUT) {
+    } else if (tb->krr_flag & IO_INST_REP_OUT) {
         if (env->regs[R_ECX] == 1)
             cpu->rr_executed_inst++;
         cpu->rr_executed_inst++;
-    } else if ((tb->io_inst & IO_INST_REP_IN) && env->regs[R_ECX] == 1) {
+    } else if ((tb->krr_flag & IO_INST_REP_IN) && env->regs[R_ECX] == 1) {
         qemu_log("rep in, inc\n");
         // if (env->regs[R_ECX] == 1)
         //     cpu->rr_executed_inst++;
         cpu->rr_executed_inst++;
-    } else if (tb->io_inst & INST_RET) {
+    } else if (tb->krr_flag & INST_RET) {
         /* Linux has some spectre mechanism that could generate
            multiple ret with the same address on system call entry. */
         cpu->rr_executed_inst++;

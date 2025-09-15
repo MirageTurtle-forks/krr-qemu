@@ -258,7 +258,7 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
         
         /* We don't wanna use cached tb of rep io instruction, because we
            need to handle it in replay() */
-        if (tb->jump_next_event != -1 || (tb->io_inst & IO_INST_REP)) {
+        if (tb->jump_next_event != -1 || (tb->krr_flag & IO_INST_REP)) {
             return NULL;
         }
 
@@ -1203,7 +1203,6 @@ int cpu_exec(CPUState *cpu)
                 case RR_RECORD_CFU:
                 case RR_CFU_BEGIN:
                     rr_do_replay_cfu(cpu, 0);
-                    // rr_handle_kernel_entry(cpu, tb->pc, cpu->rr_executed_inst + 1);
                     break;
                 case RR_PTE_CLEAR:
                 case RR_PTE_READ:
@@ -1222,14 +1221,11 @@ int cpu_exec(CPUState *cpu)
                 case PF_EXEC:
                 case GP_EXEC:
                     rr_do_replay_exception_end(cpu);
-                    // rr_handle_kernel_entry(cpu, tb->pc, cpu->rr_executed_inst + 1);
                     break;
                 case PF_EXEC_END:
                     rr_post_replay_exception(cpu);
-                    // rr_handle_kernel_entry(cpu, tb->pc, cpu->rr_executed_inst + 1);
                     break;
                 case RR_HANDLE_SYSCALL:
-                    // rr_handle_kernel_entry(cpu, tb->pc, cpu->rr_executed_inst + 1);
                     break;
                 case RR_IO_URING_BEGIN:
                     rr_do_replay_io_uring_read_tail(cpu);
@@ -1264,9 +1260,6 @@ int cpu_exec(CPUState *cpu)
             }
 
             replay_snapshot_checkpoint();
-
-            // handle_replay_rr_checkpoint(cpu, tb->io_inst & INST_REP);
-
             rr_inc_inst(cpu, tb->pc, tb);
             // qemu_log("PC 0x%lx %lu\n", tb->pc, cpu->rr_executed_inst);
 
@@ -1275,7 +1268,7 @@ int cpu_exec(CPUState *cpu)
             }
 
             if (tb->jump_next_event == -1)
-                handle_replay_rr_checkpoint(cpu, tb->io_inst & INST_REP);
+                handle_replay_rr_checkpoint(cpu, tb->krr_flag & INST_REP);
 
             cpu->last_pc = tb->pc;
 

@@ -184,8 +184,6 @@ handle_on_bp(CPUState *cpu)
             goto finish;
         }
 
-        // handle_bp_points(cpu, bp_addr);
-
         if (rr_is_address_sw(bp_addr)) {
             bp_type = GDB_BREAKPOINT_SW;
         }
@@ -316,8 +314,6 @@ static void *kvm_vcpu_thread_fn(void *arg)
 
             if (r == EXCP_DEBUG) {
                 if (!handle_on_bp(cpu)) {
-                    // handle_bp_points(cpu, cpu->kvm_run->debug.arch.pc);
-                    // handle_rr_checkpoint(cpu);
                     cpu_handle_guest_debug(cpu);
                 }
             }

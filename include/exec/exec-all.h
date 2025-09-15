@@ -536,7 +536,7 @@ struct TranslationBlock {
     uintptr_t jmp_dest[2];
 
     int jump_next_event;
-    unsigned int io_inst;
+    unsigned int krr_flag;
 };
 
 /* Hide the qatomic_read to make code a little easier on the eyes */

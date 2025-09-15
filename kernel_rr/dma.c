@@ -399,34 +399,6 @@ static PCIDevice* ide_get_pci_get_dev(void *opaque)
     return pdev;
 }
 
-__attribute_maybe_unused__ static inline void
-copy_4k_optimized(void *dst, const void *src)
-{
-    const char *s = (const char *)src;
-
-    /* Prefetch entire buffer in 256-byte strides */
-    __builtin_prefetch(s + 0, 0, 3);
-    __builtin_prefetch(s + 256, 0, 3);
-    __builtin_prefetch(s + 512, 0, 3);
-    __builtin_prefetch(s + 768, 0, 3);
-    __builtin_prefetch(s + 1024, 0, 3);
-    __builtin_prefetch(s + 1280, 0, 3);
-    __builtin_prefetch(s + 1536, 0, 3);
-    __builtin_prefetch(s + 1792, 0, 3);
-    __builtin_prefetch(s + 2048, 0, 3);
-    __builtin_prefetch(s + 2304, 0, 3);
-    __builtin_prefetch(s + 2560, 0, 3);
-    __builtin_prefetch(s + 2816, 0, 3);
-    __builtin_prefetch(s + 3072, 0, 3);
-    __builtin_prefetch(s + 3328, 0, 3);
-    __builtin_prefetch(s + 3584, 0, 3);
-    __builtin_prefetch(s + 3840, 0, 3);
-
-    /* Perform the actual copy */
-    __builtin_memcpy(dst, src, 4096);
-}
-
-
 void rr_append_dma_sg(QEMUSGList *sg, QEMUIOVector *qiov, void *cb, void *opaque)
 {
     int i;

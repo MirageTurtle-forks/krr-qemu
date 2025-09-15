@@ -195,7 +195,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
         tb->jump_next_event = EVENT_TYPE_SYSCALL;
     }
 
-    tb->io_inst = db->io_inst;
+    tb->krr_flag = db->krr_flag;
 
 #ifdef DEBUG_DISAS
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
