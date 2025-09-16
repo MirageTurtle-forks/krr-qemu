@@ -592,7 +592,7 @@ void pause_all_vcpus_no_clock(void)
     qemu_mutex_lock_iothread();
 }
 
-static void rr_kick_cpu(CPUState *cpu)
+static void replay_kick_cpu(CPUState *cpu)
 {
     qemu_cond_broadcast(cpu->replay_cond);
 }
@@ -610,7 +610,8 @@ void pause_all_vcpus(void)
         } else {
             cpu->stop = true;
             qemu_cpu_kick(cpu);
-            rr_kick_cpu(cpu);
+            if (rr_in_replay())
+                replay_kick_cpu(cpu);
         }
     }
 
