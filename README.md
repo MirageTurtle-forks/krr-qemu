@@ -261,6 +261,9 @@ Using following parameter could log out instructions & associated registers from
 ```
 The log file is specified by `-D logfile`.
 
+### Get more debug message
+During the replay, to get more detailed KRR log messages, add the option `-krr-debug`.
+
 
 ### Reverse Debugging
 KRR's replay also supports reverse debugging using gdb, the mechanism is based on snapshotting(similar to QEMU's native record & replay). So to really enable the reverse debugging, you firstly need to be able to replay successfully the target execution, during the replay, periodic snapshots need to be taken, repay it with the following command:
@@ -314,15 +317,6 @@ git apply --reject Support-for-KRR-guest-recorder-patch
 Note that this patch file is based on Linux 6.1.0, different version of source code may encounter some conflicts to resolve.
 
 To compile, we can refer to a sample [.config](kernel_rr/rr_guest_config) file, note that this config file is also based on linux 6.1.0, so depending on your own linux kernel version, it might be somehow different.
-
-
-## KRR Development
-Debugging message:
-In `include/sysemu/kernel-rr.h`, the macro below is not defined by default:
-```
-#define RR_LOG_DEBUG 1
-```
-If define this macro, there would be more detailed record/replay log message.
 
 
 ## Removed features for kernel RR
