@@ -8597,10 +8597,11 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
 
     return s->pc;
  illegal_op:
-    qemu_log("Error: Invalid ops!\n");
+    printf("Error: Invalid ops!\n");
     gen_illegal_opcode(s);
     return s->pc;
  unknown_op:
+    printf("Error: Unknown ops!\n");
     gen_unknown_opcode(env, s);
     return s->pc;
 }
