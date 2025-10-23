@@ -2307,31 +2307,6 @@ void try_replay_dma(CPUState *cs, int user_ctx)
     }
 }
 
-__attribute_maybe_unused__
-static void rr_record_settle_events(void)
-{
-    // for (int i=0; i < MAX_CPU_NUM; i++) {
-    //     while(rr_smp_event_log_queues[i] != NULL) {
-    //         try_insert_event(i);
-    //     }
-    // }
-    rr_event_log *event = NULL;
-    rr_log_all_events(rr_event_log_head);
-
-    for (int i = 0; i < MAX_CPU_NUM; i++) {
-        if (rr_smp_event_log_queues[i] != NULL) {
-            printf("Orphan event from kvm on cpu %d, record failed!\n", i);
-            event = rr_smp_event_log_queues[i];
-
-            while (event != NULL) {
-                rr_log_event(event, 0, NULL);
-                event = event->next;
-            }
-            exit(1);
-        }
-    }
-}
-
 void rr_get_result(void)
 {
     unsigned long result_buffer = 0;
@@ -2401,8 +2376,6 @@ void rr_post_record(void)
             event = event->next;
         }
     }
-
-    rr_record_settle_events();
 
     rr_print_events_stat(g_rr_session->event_counters);
 
