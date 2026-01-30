@@ -2930,7 +2930,7 @@ void rr_do_replay_rdtsc(CPUState *cpu, unsigned long *tsc)
     __attribute_maybe_unused__ CPUArchState *env;
     // verify_inst is true only when we do rdtsc exit during record,
     // for verification only.
-    bool verify_inst = false;
+    bool verify_inst = true;
 
     x86_cpu = X86_CPU(cpu);
     env = &x86_cpu->env;
